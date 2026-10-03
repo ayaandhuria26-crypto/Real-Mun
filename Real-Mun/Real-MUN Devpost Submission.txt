@@ -1,0 +1,83 @@
+REAL-MUN DEVPOST SUBMISSION
+Youth Code x AI Hackathon 2026
+
+
+LINKS TO FILL IN
+Live site    https://real-mun.vercel.app/
+Demo video   https://www.youtube.com/watch?v=Gjautta_ljA
+GitHub repo  paste your repo link here
+Track        AI for Social Good
+
+
+PROJECT NAME
+Real-MUN
+
+
+TAGLINE
+Walk into your next Model UN already knowing how it'll feel. Practice a full committee against AI delegates, get your position papers graded, and hear feedback like a real judge. Free for every student.
+
+
+INSPIRATION
+It was my third Model UN conference, and I looked around the room and saw a lot of delegates sitting there in silence. It wasn't that they had nothing to say. It was that no one had ever shown them how a committee actually works. It reminded me of my own first conference, when I was the quiet one too.
+
+I have done MUN for two years now and won Best Delegate and an Honorable Mention. But I only got good because I had people to practice with and conferences to go to. Most students don't have that. Coaching costs money, a real mock committee needs a lot of people, and the feedback that actually helps you only comes from the judges after the conference is already over. By then it is too late to use it.
+
+So I built Real-MUN to give every student a way to practice before they ever walk in.
+
+
+WHAT IT DOES
+Real-MUN is a free website that helps students train for Model UN. There are four main parts.
+
+The first is the Mock Conference. It is a full 30 minute committee with an AI Chair and three AI delegates. Each delegate represents a real country and argues the way that country actually would, with its own personality. You speak your speeches out loud and the committee talks back, running real MUN procedure like roll call, motions, and caucuses.
+
+The second is Position Paper Feedback. You paste in your paper and an AI judge scores it on five things in under a minute. It tells you exactly what to fix and whether your stance actually matches your country's real policy.
+
+The third is Speech and Session Feedback. After a mock session or a recorded speech you get a scorecard like a real judge would give you, with your strong points, your weak points, and a better version of your weakest line.
+
+The last part is Learn the Basics, which teaches procedure, vocabulary, and the fundamentals for people who are completely new.
+
+
+HOW I BUILT IT
+Real-MUN is built with Next.js, React, and TypeScript, and it runs on Vercel.
+
+The most important decision I made is in the mock conference. I made the MUN procedure follow fixed rules in code, and only used AI for the actual speeches. A planner sets up the whole session into timed phases, and then the system runs it one turn at a time. The procedural lines like recognizing speakers and passing motions come from set templates, and only the real speeches are written by AI. This keeps every session following proper procedure instead of letting the AI improvise and break the rules.
+
+Each AI delegate is given its country's real foreign policy and a personality, and I clean up every speech afterward so it stays in character and the right length. Every AI request goes through one layer that automatically switches to a backup provider if one fails, so a session never dies in the middle. The site also lets you talk to it and hear it talk back, and all the feedback comes back in a fixed format that I turn into scorecards. Logging in works with signed cookies, so I did not even need a database for that.
+
+
+CHALLENGES I RAN INTO
+The hardest part was keeping the AI delegates in character. Early on they would drift out of MUN style, repeat each other, or leak stage directions into their speeches. I fixed it with strict instructions and a cleanup step that trims and normalizes every speech.
+
+Reliability was another problem. The free AI services kept hitting their limits while I tested, so I built the backup system that switches providers automatically.
+
+I also had to figure out how to make the procedure feel real without an AI running it, which is what led to the split between fixed rules and AI speeches. And I spent a while tracking down bugs in the conference flow, like a phase that got stuck in a loop and feedback that failed to load.
+
+
+ACCOMPLISHMENTS I AM PROUD OF
+I am proud that it actually feels like a real committee. The AI delegates argue from real foreign policy, follow real procedure, and speak out loud.
+
+It is also genuinely useful. The paper grader gave my own France paper a 46 out of 50 with feedback that was specific and accurate.
+
+And it is free, it is live, and I built the whole thing myself as a high schooler.
+
+
+WHAT I LEARNED
+I learned how to design an app so the AI does the part it is good at, which is writing in character, and normal code does the part it is good at, which is rules and timing and reliability. I got a lot better at writing instructions for AI so it stays consistent. And I learned how to build a full website on Vercel with a backup system, voice features, and everything tied together.
+
+
+WHAT IS NEXT FOR REAL-MUN
+I want to add more committee types and crisis simulations. I want to let a whole MUN club practice together in shared sessions. I want to save progress so delegates can see themselves improve over time. And I want to partner with schools that do not have a MUN program at all, so students who would never get the chance can still compete.
+
+
+BUILT WITH
+next.js, react, typescript, tailwind css, vercel, xstate, zod, large language models, text to speech, speech to text, web speech api, html, css
+
+
+BEFORE YOU SUBMIT
+Upload Real-MUN Demo - FINAL v3.mp4 to YouTube as Unlisted and paste the link above.
+Paste your GitHub repo link abovfore.
+Set the project URL to https://real-mun.vercel.app/
+Copy each section into the matching Devpost field.
+Add the Built With tags.
+Pick the AI for Social Good track.
+Submit before 11:30pm EDT on June 27.

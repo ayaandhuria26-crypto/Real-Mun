@@ -217,7 +217,7 @@ ANTHROPIC_API_KEY=
 
 # --- Auth ---
 WORKER_EMAIL=ayaandhuria26@gmail.com
-WORKER_PASSWORD=ayaan2026
+WORKER_PASSWORD=set-a-strong-password
 AUTH_SECRET=change-me-to-a-random-string
 
 
@@ -247,7 +247,7 @@ EDGE_TTS_CHAIR_VOICE=en-US-AvaMultilingualNeural
 | `ANTHROPIC_FOUNDRY_API_KEY` + `AZURE_FOUNDRY_BASE_URL` | optional | Anthropic via Azure pass-through |
 | `ANTHROPIC_API_KEY` | optional | Direct Anthropic |
 | `WORKER_EMAIL` | yes (has default) | Auth — which email is allowed as worker. Default: `ayaandhuria26@gmail.com` |
-| `WORKER_PASSWORD` | yes (has default) | Default: `ayaan2026` |
+| `WORKER_PASSWORD` | yes (has default) | Default: `set-a-strong-password` |
 | `AUTH_SECRET` | yes (has default fallback `real-mun-dev-secret`) | HMAC signing secret for session cookies |
 | `RESEND_API_KEY` | optional | If set, sends real verification + booking emails. If unset, code is shown on-screen in dev mode |
 | `RESEND_FROM` | optional | Defaults to `Real-MUN <onboarding@resend.dev>` |
@@ -2230,7 +2230,7 @@ After rebuild, manually verify:
 - [ ] Motion modal lists 7 motions; submitting "Moderated Caucus" routes through `acknowledgeMotion` and returns a chair acknowledgement.
 - [ ] After 30 minutes (or hitting End), feedback screen renders with overall_score/100 and the 3 sub-scores.
 - [ ] Sign-in flow: enter email → if no Resend, dev code shown; verify → routes to home.
-- [ ] Worker sign-in (`/sign-in?required=worker`, email = `ayaandhuria26@gmail.com`, password = `ayaan2026`) lands at `/worker`.
+- [ ] Worker sign-in (`/sign-in?required=worker`, email = `ayaandhuria26@gmail.com`, password = `set-a-strong-password`) lands at `/worker`.
 - [ ] Worker dashboard shows counts and activity from submitted papers/sessions/bookings.
 
 

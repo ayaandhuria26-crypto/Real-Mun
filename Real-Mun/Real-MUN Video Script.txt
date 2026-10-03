@@ -1,0 +1,133 @@
+========================================================================
+  REAL-MUN  -  DEMO VIDEO SCRIPT  (read top to bottom)
+  Target length: under 3:00 (aim ~2:50)
+  Legend:   [SAY] = read this out loud     [DO] = action on screen
+========================================================================
+
+
+------------------------------------------------------------------------
+SLIDE 1  -  TITLE                                            (0:00 - 0:15)
+------------------------------------------------------------------------
+[SAY]
+"Hi, I'm Ayaan. I'm in 9th grade, and for the last two years I've
+competed in Model UN, where I've won Best Delegate and an Honorable
+Mention. But honestly, the best thing I've ever made in MUN isn't an
+award. It's this."
+
+
+------------------------------------------------------------------------
+SLIDE 2  -  THE PROBLEM  (your story)                        (0:15 - 0:43)
+------------------------------------------------------------------------
+[SAY]
+"It was my third conference, and I looked around at delegates sitting in
+complete silence -- not because they had nothing to say, but because no
+one had ever shown them how. And that took me right back to my own first
+committee, when I was the quiet one too.
+
+Most delegates walk in unprepared: there's nowhere to practice a real
+committee beforehand, feedback only comes after it's over, and good
+coaching is expensive and locked behind elite schools."
+
+(Slow down here. This is the emotional beat -- let it breathe.)
+
+
+------------------------------------------------------------------------
+SLIDE 3  -  THE SOLUTION                                     (0:43 - 0:56)
+------------------------------------------------------------------------
+[SAY]
+"So I built Real-MUN -- a free platform where any student can rehearse
+the entire MUN experience with AI, as many times as they need, before
+they ever walk into the room."
+
+
+------------------------------------------------------------------------
+SLIDE 4  -  WHAT IT DOES                                     (0:56 - 1:16)
+------------------------------------------------------------------------
+[SAY]
+"Real-MUN does four things. It runs full 30-minute mock committees with
+an AI Chair and AI delegates. It grades your position papers across five
+dimensions in under a minute -- here's one it just scored 46 out of 50.
+It gives you speech feedback like a real Dais. And it teaches first-timers
+the basics."
+
+
+========================================================================
+SLIDE 5  -  SEE IT IN ACTION  --  LIVE DEMO                  (1:16 - 2:30)
+========================================================================
+
+[DO]
+  - Cut to the screen recording of real-mun.vercel.app (homepage showing).
+
+[SAY]  (one line -- keep it casual)
+"This is the homepage of Real-MUN. I'm going to set up a mock conference
+right now -- I'll run a committee on climate finance, representing France."
+
+[DO]
+  - Set up the session and click "Begin session":
+        Topic     : Climate finance and the Loss and Damage Fund
+        You are   : France
+        Delegates : United States, China, Brazil
+  - Let it run. Stay quiet and let the AI Chair and delegates speak out
+    loud (roll call, motions, the caucus) -- the voices carry this part.
+
+[DO]
+  - When it's France's turn, click the speech box and DELIVER THIS SPEECH
+    -- read it aloud:
+
+   ....................................................................
+   FRANCE SPEECH  (read this word for word):
+
+   "Honorable Chair, fellow delegates. France believes climate finance
+   is not charity -- it is obligation. As the birthplace of the Paris
+   Agreement, France has committed one-point-six billion euros to the
+   Green Climate Fund, and helped operationalize the Loss and Damage
+   Fund at COP28. But pledges are not enough. France proposes a binding
+   replenishment timeline for the Fund, financed through global
+   solidarity levies on shipping and aviation. The nations least
+   responsible for this crisis cannot keep paying its highest price.
+   France yields."
+   ....................................................................
+
+[DO]
+  - Click "Deliver speech." Let one AI delegate respond.
+  - Then skip to the end and show the feedback scorecard.
+
+[SAY]  (one short line over the feedback)
+"And at the end, it scores me like a real judge."
+
+[DO]
+  - Cut back to the slides (Slide 6).
+
+(EDITING TIP: speed up the parts where the AI is "thinking" so this whole
+ demo stays around 60-75 seconds.)
+
+
+------------------------------------------------------------------------
+SLIDE 6  -  HOW IT WORKS                                     (2:30 - 2:48)
+------------------------------------------------------------------------
+[SAY]
+"Under the hood, a deterministic engine runs authentic MUN procedure,
+while the AI delegates argue from real foreign policy. You speak out loud
+and hear the room respond. It's built with Next.js and large language
+models, with automatic failover so it never breaks mid-session."
+
+
+------------------------------------------------------------------------
+SLIDE 7  -  IMPACT                                           (2:48 - 3:02)
+------------------------------------------------------------------------
+[SAY]
+"And it's completely free -- no cost, no barrier -- for every student at
+a school with no MUN program, no coach, and no budget. It's already been
+tested by more than ten delegates, and this is just the beginning."
+
+
+------------------------------------------------------------------------
+SLIDE 8  -  CLOSE                                            (3:02 - 3:08)
+------------------------------------------------------------------------
+[SAY]
+"Real-MUN. Walk in ready. Thank you for watching."
+
+
+========================================================================
+  END  -  total ~2:50.  Keep it under 3:00.
+========================================================================
