@@ -2,10 +2,19 @@ import { DELEGATE_VOICE_PROFILES } from "./voices";
 
 let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
 let currentAudio: HTMLAudioElement | null = null;
+let currentAudioUrl: string | null = null;
+let activeTtsController: AbortController | null = null;
+let speechGeneration = 0;
+let finishCurrentAudio: (() => void) | null = null;
+let finishBrowserSpeech: (() => void) | null = null;
 
 export function stopAllSpeech(): void {
+  speechGeneration += 1;
+  activeTtsController?.abort();
+  activeTtsController = null;
   if (typeof window === "undefined") return;
   window.speechSynthesis?.cancel();
+  finishBrowserSpeech?.();
   if (keepAliveInterval) {
     clearInterval(keepAliveInterval);
     keepAliveInterval = null;
@@ -14,6 +23,11 @@ export function stopAllSpeech(): void {
     currentAudio.pause();
     currentAudio.src = "";
     currentAudio = null;
+  }
+  finishCurrentAudio?.();
+  if (currentAudioUrl) {
+    URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = null;
   }
 }
 
@@ -59,25 +73,26 @@ export function speakBrowser(text: string, delegateIndex: number): Promise<void>
       });
     }
 
-    const timeout = setTimeout(resolve, maxPlayMs(text));
-
-    utter.onend = () => {
+    let settled = false;
+    const finish = (cancel = false) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       if (keepAliveInterval) {
         clearInterval(keepAliveInterval);
         keepAliveInterval = null;
       }
+      if (finishBrowserSpeech === finish) finishBrowserSpeech = null;
+      if (cancel) window.speechSynthesis.cancel();
       resolve();
     };
 
-    utter.onerror = () => {
-      clearTimeout(timeout);
-      if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
-      }
-      resolve();
-    };
+    const timeout = setTimeout(() => finish(true), maxPlayMs(text));
+    finishBrowserSpeech = finish;
+
+    utter.onend = () => finish();
+
+    utter.onerror = () => finish();
 
     keepAliveInterval = setInterval(() => {
       if (window.speechSynthesis.speaking) {
@@ -97,9 +112,12 @@ export async function speakChair(text: string): Promise<void> {
     return speakBrowser(text, 0);
   }
 
+  const generation = speechGeneration;
+  const controller = new AbortController();
+  activeTtsController = controller;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
+    timeout = setTimeout(() => controller.abort(), 12_000);
 
     const res = await fetch("/api/tts", {
       method: "POST",
@@ -107,39 +125,64 @@ export async function speakChair(text: string): Promise<void> {
       body: JSON.stringify({ text }),
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
+    timeout = null;
+    if (generation !== speechGeneration || controller.signal.aborted) return;
 
     if (!res.ok) throw new Error(`TTS fetch failed: ${res.status}`);
 
     const blob = await res.blob();
+    if (generation !== speechGeneration || controller.signal.aborted) return;
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudio = audio;
+    currentAudioUrl = url;
+
+    const cleanup = () => {
+      if (currentAudio === audio) currentAudio = null;
+      if (currentAudioUrl === url) {
+        URL.revokeObjectURL(url);
+        currentAudioUrl = null;
+      }
+    };
 
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, maxPlayMs(text));
-      audio.onended = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(url);
-        currentAudio = null;
+      let finished = false;
+      let audioTimeout: ReturnType<typeof setTimeout>;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(audioTimeout);
+        cleanup();
+        if (finishCurrentAudio === finish) finishCurrentAudio = null;
         resolve();
+      };
+      finishCurrentAudio = finish;
+      audioTimeout = setTimeout(() => {
+        audio.pause();
+        audio.src = "";
+        finish();
+      }, maxPlayMs(text));
+      audio.onended = () => {
+        finish();
       };
       audio.onerror = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(url);
-        currentAudio = null;
-        resolve();
+        finish();
       };
-      audio.play().catch(() => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(url);
-        currentAudio = null;
-        resolve();
-      });
+      try {
+        audio.play().catch(() => {
+          finish();
+        });
+      } catch {
+        finish();
+      }
     });
   } catch {
+    if (generation !== speechGeneration || controller.signal.aborted) return;
     return speakBrowser(text, 0);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (activeTtsController === controller) activeTtsController = null;
   }
 }
 
@@ -168,9 +211,12 @@ export function startWebSpeech(onPartial: (text: string) => void): {
 
   let finalText = "";
   let resolveStop: ((text: string) => void) | null = null;
+  let stopPromise: Promise<string> | null = null;
   let stopped = false;
+  let ended = false;
 
   recognition.onresult = (event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => {
+    if (stopped || ended) return;
     let rebuilt = "";
     for (let i = 0; i < event.results.length; i++) {
       rebuilt += event.results[i][0].transcript;
@@ -180,24 +226,34 @@ export function startWebSpeech(onPartial: (text: string) => void): {
   };
 
   recognition.onend = () => {
+    ended = true;
     if (resolveStop && !stopped) {
       stopped = true;
       resolveStop(finalText);
+      resolveStop = null;
     }
   };
 
   recognition.onerror = () => {
+    ended = true;
     if (resolveStop && !stopped) {
       stopped = true;
       resolveStop(finalText);
+      resolveStop = null;
     }
   };
 
   recognition.start();
 
   return {
-    stop: () =>
-      new Promise<string>((resolve) => {
+    stop: () => {
+      if (stopPromise) return stopPromise;
+      stopPromise = new Promise<string>((resolve) => {
+        if (ended || stopped) {
+          stopped = true;
+          resolve(finalText);
+          return;
+        }
         resolveStop = resolve;
         try {
           recognition.stop();
@@ -205,11 +261,16 @@ export function startWebSpeech(onPartial: (text: string) => void): {
           if (!stopped) {
             stopped = true;
             resolve(finalText);
+            resolveStop = null;
           }
         }
-      }),
+      });
+      return stopPromise;
+    },
     cancel: () => {
       stopped = true;
+      resolveStop?.(finalText);
+      resolveStop = null;
       try {
         recognition.abort();
       } catch {
@@ -220,7 +281,7 @@ export function startWebSpeech(onPartial: (text: string) => void): {
 }
 
 export function createRecorder(): {
-  start: () => void;
+  start: () => Promise<void>;
   stop: () => Promise<Blob>;
   cancel: () => void;
 } {
@@ -228,6 +289,8 @@ export function createRecorder(): {
   let chunks: Blob[] = [];
   let streamRef: MediaStream | null = null;
   let resolveStop: ((blob: Blob) => void) | null = null;
+  let cancelled = false;
+  let startPromise: Promise<void> | null = null;
 
   const mimeTypes = [
     "audio/webm;codecs=opus",
@@ -240,29 +303,48 @@ export function createRecorder(): {
   const supportedMime = mimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || "";
 
   return {
-    start: async () => {
+    start: () => {
       chunks = [];
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef = stream;
-      mediaRecorder = new MediaRecorder(stream, supportedMime ? { mimeType: supportedMime } : {});
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: supportedMime || "audio/webm" });
-        streamRef?.getTracks().forEach((t) => t.stop());
-        streamRef = null;
-        resolveStop?.(blob);
-      };
-      mediaRecorder.start();
+      cancelled = false;
+      startPromise = (async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef = stream;
+        mediaRecorder = new MediaRecorder(stream, supportedMime ? { mimeType: supportedMime } : {});
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: supportedMime || "audio/webm" });
+          streamRef?.getTracks().forEach((t) => t.stop());
+          streamRef = null;
+          resolveStop?.(blob);
+        };
+        mediaRecorder.start();
+      })();
+      return startPromise;
     },
-    stop: () =>
-      new Promise<Blob>((resolve) => {
+    stop: async () => {
+      if (startPromise) await startPromise;
+      return new Promise<Blob>((resolve) => {
         resolveStop = resolve;
-        mediaRecorder?.stop();
-      }),
+        if (mediaRecorder?.state === "recording") {
+          mediaRecorder.stop();
+        } else {
+          streamRef?.getTracks().forEach((track) => track.stop());
+          streamRef = null;
+          resolve(new Blob(chunks, { type: supportedMime || "audio/webm" }));
+        }
+      });
+    },
     cancel: () => {
-      mediaRecorder?.stop();
+      cancelled = true;
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
       streamRef?.getTracks().forEach((t) => t.stop());
       streamRef = null;
     },

@@ -9,24 +9,37 @@ export const maxDuration = 60;
 
 const DelegateSchema = z.object({
   id: z.enum(["d1", "d2", "d3"]),
-  country: z.string().min(2),
+  country: z.string().trim().min(2).max(100),
   persona: z.enum(["diplomatic", "aggressive", "coalition_builder", "technical", "quiet"]),
-  shortDescription: z.string(),
+  shortDescription: z.string().max(500),
 });
 
 const Schema = z.object({
-  committee: z.string().min(2),
-  topic: z.string().min(2),
-  userCountry: z.string().min(2),
+  committee: z.string().trim().min(2).max(100),
+  topic: z.string().trim().min(2).max(300),
+  userCountry: z.string().trim().min(2).max(100),
   delegates: z.tuple([DelegateSchema, DelegateSchema, DelegateSchema]),
   totalDurationMs: z.number().int().min(60_000).max(3_600_000).default(30 * 60_000),
+}).superRefine((setup, context) => {
+  const countries = [setup.userCountry, ...setup.delegates.map((delegate) => delegate.country)];
+  const normalized = countries.map((country) => country.toLowerCase());
+  if (new Set(normalized).size !== normalized.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["delegates"],
+      message: "Each delegation must represent a different country.",
+    });
+  }
 });
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const parsed = Schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid input", details: parsed.error.issues }, { status: 400 });
+    return NextResponse.json({
+      error: parsed.error.issues[0]?.message || "Invalid input",
+      details: parsed.error.issues,
+    }, { status: 400 });
   }
 
   const setup = parsed.data;

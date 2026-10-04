@@ -1,3 +1,6 @@
+export const MAX_SESSION_USER_SPEECH_CHARS = 70_000;
+export const MAX_SESSION_TRANSCRIPT_CHARS = 100_000;
+
 export type Persona =
   | "diplomatic"
   | "aggressive"
@@ -72,13 +75,14 @@ export interface ConferenceState {
   userHasFloor: boolean;
   userSpeechCount: number;
   status: "active" | "ended";
+  endReason?: "transcript-limit";
 }
 
 export type TurnResponse =
   | { kind: "speech"; speaker: string; text: string }
   | { kind: "user-floor"; chairLine: string }
   | { kind: "phase-transition"; from: PhaseType; to: PhaseType }
-  | { kind: "session-ended" };
+  | { kind: "session-ended"; reason?: "transcript-limit" };
 
 export interface TurnResult {
   response: TurnResponse;

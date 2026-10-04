@@ -65,6 +65,20 @@ export default function ConferenceSetupPage() {
   }
 
   async function begin() {
+    if (committee.trim().length < 2 || topic.trim().length < 2) {
+      setError("Enter a committee and topic with at least two characters each.");
+      return;
+    }
+    const countries = [userCountry, ...delegates.map((delegate) => delegate.country)];
+    if (countries.some((country) => country.trim().length < 2)) {
+      setError("Enter a country of at least two characters for every delegation.");
+      return;
+    }
+    if (new Set(countries.map((country) => country.trim().toLowerCase())).size !== countries.length) {
+      setError("Each delegation must represent a different country.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -74,13 +88,17 @@ export default function ConferenceSetupPage() {
         body: JSON.stringify({
           committee,
           topic,
-          userCountry,
-          delegates,
+          userCountry: userCountry.trim(),
+          delegates: delegates.map((delegate) => ({
+            ...delegate,
+            country: delegate.country.trim(),
+          })),
           totalDurationMs: 30 * 60_000,
         }),
       });
-      const data = await res.json();
+      const data: { error?: string; state?: unknown } = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to start session");
+      if (!data.state) throw new Error("The conference planner returned an incomplete session. Please try again.");
       sessionStorage.setItem("conferenceState", JSON.stringify(data.state));
       router.push("/conference/live");
     } catch (e) {
@@ -131,6 +149,8 @@ export default function ConferenceSetupPage() {
         </h2>
         <input
           type="text"
+          minLength={2}
+          maxLength={300}
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           className="w-full px-4 py-3 rounded-lg border text-sm mb-3"
@@ -167,6 +187,8 @@ export default function ConferenceSetupPage() {
         </h2>
         <input
           type="text"
+          minLength={2}
+          maxLength={100}
           value={userCountry}
           onChange={(e) => setUserCountry(e.target.value)}
           className="w-full px-4 py-3 rounded-lg border text-sm mb-3"
@@ -218,6 +240,8 @@ export default function ConferenceSetupPage() {
                   </label>
                   <input
                     type="text"
+                    minLength={2}
+                    maxLength={100}
                     value={d.country}
                     onChange={(e) => updateDelegate(d.id, { country: e.target.value })}
                     className="w-full px-3 py-2 rounded-md border text-sm"
@@ -256,6 +280,7 @@ export default function ConferenceSetupPage() {
                     Description
                   </label>
                   <textarea
+                    maxLength={500}
                     value={d.shortDescription}
                     onChange={(e) => updateDelegate(d.id, { shortDescription: e.target.value })}
                     rows={2}
@@ -294,7 +319,7 @@ export default function ConferenceSetupPage() {
 
       <button
         onClick={begin}
-        disabled={loading || !committee || !topic || !userCountry}
+        disabled={loading || committee.trim().length < 2 || topic.trim().length < 2 || userCountry.trim().length < 2}
         className="btn btn-primary text-base px-8 py-3"
         style={{ fontSize: "1rem" }}
       >

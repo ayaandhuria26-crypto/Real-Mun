@@ -19,18 +19,37 @@ export default function PositionPaperPage() {
   async function submit() {
     setLoading(true);
     setError("");
+    const normalized = {
+      committee: committee.trim(),
+      country: country.trim(),
+      topic: topic.trim(),
+      paper: paper.trim(),
+    };
     try {
       const res = await fetch("/api/paper-feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ committee, country, topic, paper }),
+        body: JSON.stringify(normalized),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Feedback failed");
-      setFeedback(data.feedback as FeedbackData);
+      const data: { error?: string; feedback?: FeedbackData } = await res
+        .json()
+        .catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Feedback failed. Please try again.");
+      if (!data.feedback) throw new Error("Feedback was incomplete. Please try again.");
+      setCommittee(normalized.committee);
+      setCountry(normalized.country);
+      setTopic(normalized.topic);
+      setPaper(normalized.paper);
+      setFeedback(data.feedback);
       setStep(5);
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        e instanceof TypeError
+          ? "Could not reach the grading service. Check your connection and try again."
+          : e instanceof Error
+            ? e.message
+            : "Feedback failed. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -148,6 +167,8 @@ export default function PositionPaperPage() {
           <input
             type="text"
             placeholder="Type or select a country..."
+            minLength={2}
+            maxLength={100}
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             className="w-full px-4 py-3 rounded-lg border mb-4 text-base"
@@ -179,8 +200,8 @@ export default function PositionPaperPage() {
               Back
             </button>
             <button
-              onClick={() => country && setStep(3)}
-              disabled={!country}
+              onClick={() => country.trim().length >= 2 && setStep(3)}
+              disabled={country.trim().length < 2}
               className="btn btn-primary"
             >
               Continue
@@ -201,6 +222,8 @@ export default function PositionPaperPage() {
           <input
             type="text"
             placeholder="Enter the agenda topic..."
+            minLength={2}
+            maxLength={300}
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             className="w-full px-4 py-3 rounded-lg border mb-4 text-base"
@@ -232,8 +255,8 @@ export default function PositionPaperPage() {
               Back
             </button>
             <button
-              onClick={() => topic && setStep(4)}
-              disabled={!topic}
+              onClick={() => topic.trim().length >= 2 && setStep(4)}
+              disabled={topic.trim().length < 2}
               className="btn btn-primary"
             >
               Continue

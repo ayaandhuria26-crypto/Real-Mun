@@ -196,7 +196,7 @@ Create `.env.local` (git-ignored). `.env.example` is the template kept in the re
 
 # 1) Google Gemini — get key at https://aistudio.google.com (~250 req/day free)
 GEMINI_API_KEY=
-# GEMINI_MODEL=gemini-flash-latest
+# GEMINI_MODEL=gemini-3.8-flash
 
 
 # 2) Groq — get key at https://console.groq.com (~14,400 req/day free, very fast)
@@ -424,7 +424,7 @@ Exports:
 This is the workhorse for all LLM calls. Provider order (built once at module load, only includes providers with keys present):
 
 
-1. **Gemini** (`GEMINI_API_KEY`) — model defaults to `gemini-flash-latest`
+1. **Gemini** (`GEMINI_API_KEY`) — model defaults to `gemini-3.8-flash`
 2. **Groq** (`GROQ_API_KEY`) — OpenAI-compatible HTTP, model `llama-3.3-70b-versatile`
 3. **Cerebras** (`CEREBRAS_API_KEY`) — OpenAI-compatible HTTP, model `qwen-3-235b-a22b-instruct-2507`
 4. **Anthropic** — uses the SDK from `anthropic.ts`, model `MODEL_SONNET`, with `cache_control: { type: "ephemeral" }` on system prompt for prompt caching

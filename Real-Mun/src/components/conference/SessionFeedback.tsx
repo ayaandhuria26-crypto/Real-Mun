@@ -18,6 +18,8 @@ export interface SessionFeedbackData {
   next_session_focus: string[];
 }
 
+export type SessionFeedbackResult = SessionFeedbackData | { error: string };
+
 function letterGrade(pct: number): string {
   if (pct >= 0.9) return "A+";
   if (pct >= 0.8) return "A";
@@ -45,20 +47,28 @@ function ScoreBar({ score, max = 10 }: { score: number; max?: number }) {
 
 export default function SessionFeedback({
   feedback,
+  onRetry,
 }: {
-  feedback: SessionFeedbackData;
+  feedback: SessionFeedbackResult;
+  onRetry?: () => void;
 }) {
-  if (!feedback || (feedback as unknown as { error?: string }).error) {
+  if (!feedback || "error" in feedback) {
     return (
       <div className="card">
         <p style={{ color: "var(--color-muted)" }}>
-          Feedback unavailable. {(feedback as unknown as { error?: string }).error ?? ""}
+          Feedback unavailable. {feedback?.error ?? ""}
         </p>
+        {onRetry && (
+          <button onClick={onRetry} className="btn btn-secondary mt-4 text-sm">
+            Retry feedback
+          </button>
+        )}
       </div>
     );
   }
 
-  const pct = feedback.overall_score / 100;
+  const overallScore = Number(feedback.overall_score.toFixed(1));
+  const pct = Math.max(0, Math.min(overallScore / 100, 1));
   const grade = letterGrade(pct);
 
   return (
@@ -69,7 +79,7 @@ export default function SessionFeedback({
           <div>
             <div className="text-5xl font-bold mb-1"
               style={{ fontFamily: "var(--font-display)", color: "var(--color-paper)" }}>
-              {feedback.overall_score}
+              {overallScore}
               <span className="text-2xl" style={{ color: "rgba(245,243,237,0.5)" }}>/100</span>
             </div>
             <div className="text-2xl font-bold" style={{ color: "var(--color-accent)" }}>
@@ -90,6 +100,7 @@ export default function SessionFeedback({
           { key: "engagement", label: "Engagement" },
         ].map(({ key, label }) => {
           const s = feedback[key as keyof Pick<SessionFeedbackData, "delivery" | "content" | "engagement">];
+          const score = Number(s.score.toFixed(1));
           return (
             <div key={key} className="card">
               <div className="flex justify-between items-baseline mb-1">
@@ -97,10 +108,10 @@ export default function SessionFeedback({
                   {label}
                 </span>
                 <span className="text-sm font-bold" style={{ color: "var(--color-accent)" }}>
-                  {s.score}/10
+                  {score}/10
                 </span>
               </div>
-              <ScoreBar score={s.score} />
+              <ScoreBar score={score} />
               <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
                 {s.comment}
               </p>

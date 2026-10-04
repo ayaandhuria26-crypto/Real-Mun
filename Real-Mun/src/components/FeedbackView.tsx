@@ -35,7 +35,7 @@ function letterGrade(pct: number): string {
 }
 
 function ScoreBar({ score, max = 10 }: { score: number; max?: number }) {
-  const pct = Math.min(score / max, 1);
+  const pct = Math.max(0, Math.min(score / max, 1));
   return (
     <div className="w-full h-1.5 rounded-full mt-2"
       style={{ background: "var(--color-border-strong)" }}>
@@ -69,7 +69,8 @@ export default function FeedbackView({
   country?: string;
   topic?: string;
 }) {
-  const pct = feedback.overall_score / 50;
+  const overallScore = Number(feedback.overall_score.toFixed(1));
+  const pct = Math.max(0, Math.min(overallScore / 50, 1));
   const grade = letterGrade(pct);
 
   return (
@@ -83,7 +84,7 @@ export default function FeedbackView({
           <div>
             <div className="text-5xl font-bold mb-1"
               style={{ fontFamily: "var(--font-display)", color: "var(--color-paper)" }}>
-              {feedback.overall_score}
+              {overallScore}
               <span className="text-2xl" style={{ color: "rgba(245,243,237,0.5)" }}>/50</span>
             </div>
             <div className="text-2xl font-bold" style={{ color: "var(--color-accent)" }}>
@@ -110,6 +111,7 @@ export default function FeedbackView({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {(Object.keys(feedback.scores) as Array<keyof typeof feedback.scores>).map((key) => {
           const s = feedback.scores[key];
+          const score = Number(s.score.toFixed(1));
           return (
             <div key={key} className="card">
               <div className="flex justify-between items-baseline mb-1">
@@ -117,10 +119,10 @@ export default function FeedbackView({
                   {DIMENSION_LABELS[key]}
                 </span>
                 <span className="text-sm font-bold" style={{ color: "var(--color-accent)" }}>
-                  {s.score}/10
+                  {score}/10
                 </span>
               </div>
-              <ScoreBar score={s.score} />
+              <ScoreBar score={score} />
               <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
                 {s.comment}
               </p>
@@ -149,27 +151,27 @@ export default function FeedbackView({
           <div className="font-semibold mb-3 text-sm" style={{ color: "var(--color-accent)" }}>
             Strengths
           </div>
-          <ul className="space-y-2">
+          {feedback.strengths.length > 0 ? <ul className="space-y-2">
             {feedback.strengths.map((s, i) => (
               <li key={i} className="text-sm flex gap-2">
                 <span style={{ color: "var(--color-accent)" }}>✓</span>
                 <span style={{ color: "var(--color-muted)" }}>{s}</span>
               </li>
             ))}
-          </ul>
+          </ul> : <p className="text-sm" style={{ color: "var(--color-muted)" }}>No clear strengths identified yet.</p>}
         </div>
         <div className="card">
           <div className="font-semibold mb-3 text-sm" style={{ color: "#dc2626" }}>
             Weaknesses
           </div>
-          <ul className="space-y-2">
+          {feedback.weaknesses.length > 0 ? <ul className="space-y-2">
             {feedback.weaknesses.map((w, i) => (
               <li key={i} className="text-sm flex gap-2">
                 <span style={{ color: "#dc2626" }}>✗</span>
                 <span style={{ color: "var(--color-muted)" }}>{w}</span>
               </li>
             ))}
-          </ul>
+          </ul> : <p className="text-sm" style={{ color: "var(--color-muted)" }}>No specific weaknesses identified.</p>}
         </div>
       </div>
 

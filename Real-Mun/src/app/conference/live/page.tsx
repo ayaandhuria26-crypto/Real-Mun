@@ -3,9 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ConferenceState, TranscriptEntry, TurnResult } from "@/lib/conference/types";
+import {
+  MAX_SESSION_TRANSCRIPT_CHARS,
+  MAX_SESSION_USER_SPEECH_CHARS,
+} from "@/lib/conference/types";
 import TranscriptFeed from "@/components/conference/TranscriptFeed";
 import PhaseProgress from "@/components/conference/PhaseProgress";
-import SessionFeedback, { type SessionFeedbackData } from "@/components/conference/SessionFeedback";
+import SessionFeedback, { type SessionFeedbackResult } from "@/components/conference/SessionFeedback";
 import {
   speakChair,
   speakBrowser,
@@ -53,13 +57,18 @@ export default function LiveConferencePage() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [draftSpeech, setDraftSpeech] = useState("");
-  const [feedback, setFeedback] = useState<SessionFeedbackData | null>(null);
+  const [feedback, setFeedback] = useState<SessionFeedbackResult | null>(null);
+  const [feedbackRetry, setFeedbackRetry] = useState(0);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
   const [floorJustOpened, setFloorJustOpened] = useState(false);
 
   const inFlightRef = useRef(false);
+  const turnEpochRef = useRef(0);
+  const turnControllerRef = useRef<AbortController | null>(null);
+  const pausedRef = useRef(false);
+  const captureGenerationRef = useRef(0);
   const stateRef = useRef<ConferenceState | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
@@ -94,6 +103,20 @@ export default function LiveConferencePage() {
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(id);
+  }, []);
+
+  // Stop speech and microphone capture if the user leaves the live session.
+  useEffect(() => () => {
+    turnEpochRef.current += 1;
+    turnControllerRef.current?.abort();
+    turnControllerRef.current = null;
+    inFlightRef.current = false;
+    stopAllSpeech();
+    webSpeechRef.current?.cancel();
+    recorderRef.current?.cancel();
+    webSpeechRef.current = null;
+    recorderRef.current = null;
+    captureGenerationRef.current += 1;
   }, []);
 
   // Floor-open effect
@@ -132,34 +155,52 @@ export default function LiveConferencePage() {
   // Fetch feedback when session ends (with retry for rate limits)
   useEffect(() => {
     if (!state || state.status !== "ended" || feedback || loadingFeedback) return;
+    const feedbackController = new AbortController();
     setLoadingFeedback(true);
 
     async function fetchFeedback(attempt = 0): Promise<void> {
+      if (feedbackController.signal.aborted) return;
       try {
         const r = await fetch("/api/conference/feedback", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ state }),
+          signal: feedbackController.signal,
         });
         const d = await r.json();
-        if (!r.ok && attempt < 3) {
-          await new Promise((res) => setTimeout(res, 3000 * (attempt + 1)));
-          return fetchFeedback(attempt + 1);
+        if (!r.ok) {
+          const retryLimit = r.status === 429 ? 3 : r.status >= 500 ? 1 : 0;
+          if (attempt < retryLimit) {
+            await new Promise((res) => setTimeout(res, 3000 * (attempt + 1)));
+            return fetchFeedback(attempt + 1);
+          }
+          setFeedback({ error: d.error || "Feedback generation failed. Please try again." });
+          return;
         }
-        setFeedback(d.feedback as SessionFeedbackData);
+        if (!d.feedback) {
+          setFeedback({ error: "Feedback response was incomplete. Please try again." });
+          return;
+        }
+        setFeedback(d.feedback as SessionFeedbackResult);
       } catch {
+        if (feedbackController.signal.aborted) return;
         if (attempt < 3) {
           await new Promise((res) => setTimeout(res, 3000 * (attempt + 1)));
           return fetchFeedback(attempt + 1);
         }
-        setFeedback({ error: "Failed to load feedback" } as unknown as SessionFeedbackData);
+        setFeedback({ error: "Failed to load feedback. Please try again." });
       } finally {
-        if (attempt === 0 || attempt >= 3) setLoadingFeedback(false);
+        if (!feedbackController.signal.aborted && (attempt === 0 || attempt >= 3)) {
+          setLoadingFeedback(false);
+        }
       }
     }
 
-    fetchFeedback().finally(() => setLoadingFeedback(false));
-  }, [state?.status]);
+    fetchFeedback().finally(() => {
+      if (!feedbackController.signal.aborted) setLoadingFeedback(false);
+    });
+    return () => feedbackController.abort();
+  }, [state?.status, feedbackRetry]);
 
   function applyServerResult(result: TurnResult, prevState: ConferenceState): ConferenceState {
     const merged: ConferenceState = {
@@ -177,6 +218,9 @@ export default function LiveConferencePage() {
     if (inFlightRef.current) return;
     const s = stateRef.current;
     if (!s || s.status === "ended" || s.userHasFloor || paused) return;
+    const requestEpoch = turnEpochRef.current;
+    const turnController = new AbortController();
+    turnControllerRef.current = turnController;
     inFlightRef.current = true;
     setTurnLoading(true);
     setError("");
@@ -185,16 +229,34 @@ export default function LiveConferencePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state: s }),
+        signal: turnController.signal,
       });
       const result: TurnResult = await res.json();
       if (!res.ok) throw new Error((result as unknown as { error: string }).error || "Turn failed");
 
-      const newState = applyServerResult(result, stateRef.current!);
+      const latestState = stateRef.current;
+      if (
+        turnEpochRef.current !== requestEpoch ||
+        pausedRef.current ||
+        !latestState ||
+        latestState.status === "ended" ||
+        latestState.phaseIndex !== s.phaseIndex
+      ) {
+        return;
+      }
+
+      const newState = applyServerResult(result, latestState);
       setState(newState);
       stateRef.current = newState;
 
       // Play audio for new entries
       for (const entry of result.newEntries) {
+        if (
+          turnEpochRef.current !== requestEpoch ||
+          pausedRef.current ||
+          stateRef.current?.status === "ended" ||
+          stateRef.current?.phaseIndex !== newState.phaseIndex
+        ) break;
         if (entry.role === "system") continue;
         setSpeakingId(entry.id);
         try {
@@ -213,21 +275,36 @@ export default function LiveConferencePage() {
         setState((prev) => prev ? { ...prev, status: "ended" } : prev);
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (
+        turnEpochRef.current === requestEpoch &&
+        !pausedRef.current &&
+        stateRef.current?.status !== "ended" &&
+        stateRef.current?.phaseIndex === s.phaseIndex
+      ) {
+        setError((e as Error).message);
+      }
     } finally {
-      setTurnLoading(false);
-      inFlightRef.current = false;
+      if (turnControllerRef.current === turnController) {
+        turnControllerRef.current = null;
+      }
+      if (turnEpochRef.current === requestEpoch) {
+        setTurnLoading(false);
+        inFlightRef.current = false;
+      }
     }
   }, [paused]);
 
   // Auto-advance loop
   useEffect(() => {
-    if (!state || state.status === "ended" || state.userHasFloor || paused || turnLoading) return;
+    // Keep a failed turn from being retried every 500ms. The user can resume
+    // the conference after checking the displayed error.
+    if (!state || state.status === "ended" || state.userHasFloor || paused || turnLoading || error) return;
     const t = setTimeout(() => { runNextTurn(); }, 500);
     return () => clearTimeout(t);
-  }, [state, paused, turnLoading, runNextTurn]);
+  }, [state, paused, turnLoading, runNextTurn, error]);
 
   function raisePlacard() {
+    setError("");
     setState((prev) =>
       prev ? { ...prev, pendingFloorRequest: { type: "placard" } } : prev
     );
@@ -235,6 +312,7 @@ export default function LiveConferencePage() {
 
   function submitMotion() {
     if (!selectedMotion) return;
+    setError("");
     setState((prev) =>
       prev
         ? {
@@ -252,34 +330,84 @@ export default function LiveConferencePage() {
     setMotionDetails("");
   }
 
+  function cancelActiveCapture() {
+    captureGenerationRef.current += 1;
+    webSpeechRef.current?.cancel();
+    webSpeechRef.current = null;
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    setRecording(false);
+    setTranscribing(false);
+  }
+
   async function startRecording() {
+    if (recording || transcribing) return;
     if (isWebSpeechSupported()) {
       setRecording(true);
-      webSpeechRef.current = startWebSpeech((partial) => setDraftSpeech(partial));
+      const generation = captureGenerationRef.current;
+      try {
+        webSpeechRef.current = startWebSpeech((partial) => {
+          if (generation === captureGenerationRef.current) setDraftSpeech(partial);
+        });
+        setError("");
+      } catch {
+        captureGenerationRef.current += 1;
+        webSpeechRef.current = null;
+        setRecording(false);
+        setError("Browser speech recognition could not start. Check microphone permissions or type your speech instead.");
+      }
     } else {
       setRecording(true);
-      recorderRef.current = createRecorder();
-      recorderRef.current.start();
+      let recorder: ReturnType<typeof createRecorder> | null = null;
+      try {
+        recorder = createRecorder();
+        recorderRef.current = recorder;
+        await recorder.start();
+        if (recorderRef.current === recorder) setError("");
+      } catch {
+        if (recorder && recorderRef.current !== recorder) return;
+        captureGenerationRef.current += 1;
+        recorder?.cancel();
+        recorderRef.current = null;
+        setRecording(false);
+        setTranscribing(false);
+        setError("Microphone recording is unavailable. Check your browser permissions or type your speech instead.");
+      }
     }
   }
 
   async function stopRecording() {
     if (webSpeechRef.current) {
-      const text = await webSpeechRef.current.stop();
-      webSpeechRef.current = null;
-      setDraftSpeech(text);
-    } else if (recorderRef.current) {
+      const recognition = webSpeechRef.current;
+      const generation = captureGenerationRef.current;
       setRecording(false);
       setTranscribing(true);
       try {
-        const blob = await recorderRef.current.stop();
-        recorderRef.current = null;
-        const text = await transcribeAudio(blob);
-        setDraftSpeech((prev) => (prev ? prev + " " + text : text));
-      } catch {
-        setError("Transcription failed — try typing instead.");
+        const text = await recognition.stop();
+        if (webSpeechRef.current === recognition) webSpeechRef.current = null;
+        if (generation === captureGenerationRef.current) setDraftSpeech(text);
       } finally {
-        setTranscribing(false);
+        if (generation === captureGenerationRef.current) setTranscribing(false);
+      }
+    } else if (recorderRef.current) {
+      const recorder = recorderRef.current;
+      const generation = captureGenerationRef.current;
+      setRecording(false);
+      setTranscribing(true);
+      try {
+        const blob = await recorder.stop();
+        if (recorderRef.current === recorder) recorderRef.current = null;
+        if (generation !== captureGenerationRef.current) return;
+        const text = await transcribeAudio(blob);
+        if (generation === captureGenerationRef.current) {
+          setDraftSpeech((prev) => (prev ? prev + " " + text : text));
+        }
+      } catch {
+        if (generation === captureGenerationRef.current) {
+          setError("Transcription failed — try typing instead.");
+        }
+      } finally {
+        if (generation === captureGenerationRef.current) setTranscribing(false);
       }
       return;
     }
@@ -287,8 +415,31 @@ export default function LiveConferencePage() {
   }
 
   function deliverSpeech() {
-    if (!draftSpeech.trim() || !state) return;
-    const e = newEntry("user", state.setup.userCountry, draftSpeech.trim());
+    if (!draftSpeech.trim() || !state || recording || transcribing) return;
+    const text = draftSpeech.trim();
+    if (text.length > 10_000) {
+      setDraftSpeech(text.slice(0, 10_000));
+      setError("Speech is limited to 10,000 characters. The draft was shortened to fit.");
+      return;
+    }
+    const existingUserSpeechChars = state.transcript.reduce(
+      (total, entry) => total + (entry.role === "user" ? entry.text.length : 0),
+      0
+    );
+    if (existingUserSpeechChars + text.length > MAX_SESSION_USER_SPEECH_CHARS) {
+      setError("This session has reached its total speech limit. End the session to receive feedback on speeches so far.");
+      return;
+    }
+    const existingTranscriptChars = state.transcript.reduce(
+      (total, entry) => total + entry.text.length,
+      0
+    );
+    if (existingTranscriptChars + text.length > MAX_SESSION_TRANSCRIPT_CHARS) {
+      setError("The session transcript has reached its limit. End the session to receive feedback on speeches so far.");
+      return;
+    }
+    setError("");
+    const e = newEntry("user", state.setup.userCountry, text);
     setState((prev) =>
       prev
         ? {
@@ -303,23 +454,35 @@ export default function LiveConferencePage() {
   }
 
   function yieldFloor() {
+    cancelActiveCapture();
+    setError("");
     setState((prev) => (prev ? { ...prev, userHasFloor: false } : prev));
     setDraftSpeech("");
   }
 
   function skipPhase() {
     if (!confirm("Skip to next phase?")) return;
+    turnEpochRef.current += 1;
+    turnControllerRef.current?.abort();
+    turnControllerRef.current = null;
+    inFlightRef.current = false;
+    setTurnLoading(false);
     stopAllSpeech();
+    cancelActiveCapture();
+    setError("");
+    setDraftSpeech("");
     setState((prev) => {
       if (!prev) return prev;
       const next = prev.phaseIndex + 1;
       return {
         ...prev,
         phaseIndex: next,
+        status: next >= prev.plan.phases.length ? "ended" : prev.status,
         lastOpenedPhaseIndex: prev.lastOpenedPhaseIndex,
         speakerQueueIndex: 0,
         turnsThisPhase: 0,
         phaseStartedAt: Date.now(),
+        pendingFloorRequest: null,
         userHasFloor: false,
       };
     });
@@ -327,7 +490,13 @@ export default function LiveConferencePage() {
 
   function endSession() {
     if (!confirm("End the session now?")) return;
+    turnEpochRef.current += 1;
+    turnControllerRef.current?.abort();
+    turnControllerRef.current = null;
+    inFlightRef.current = false;
+    setTurnLoading(false);
     stopAllSpeech();
+    cancelActiveCapture();
     setState((prev) => (prev ? { ...prev, status: "ended" } : prev));
   }
 
@@ -363,6 +532,11 @@ export default function LiveConferencePage() {
           <p style={{ color: "rgba(245,243,237,0.6)" }}>
             {state.setup.topic} · {state.userSpeechCount} speech{state.userSpeechCount !== 1 ? "es" : ""} given as {state.setup.userCountry}
           </p>
+          {state.endReason === "transcript-limit" && (
+            <p className="mt-3 text-sm" style={{ color: "var(--color-accent)" }}>
+              The transcript reached its size limit, so the session ended to keep feedback available.
+            </p>
+          )}
         </div>
 
         {loadingFeedback && (
@@ -381,7 +555,13 @@ export default function LiveConferencePage() {
           </div>
         )}
         {feedback && !loadingFeedback && (
-          <SessionFeedback feedback={feedback} />
+          <SessionFeedback
+            feedback={feedback}
+            onRetry={() => {
+              setFeedback(null);
+              setFeedbackRetry((attempt) => attempt + 1);
+            }}
+          />
         )}
         <div className="flex gap-4 mt-8">
           <button onClick={() => router.push("/conference")} className="btn btn-primary">
@@ -427,12 +607,30 @@ export default function LiveConferencePage() {
               Total: {formatTime(sessionElapsed)}
             </div>
             <button
-              onClick={() => { setPaused((p) => !p); if (!paused) stopAllSpeech(); }}
+              onClick={() => {
+                const nextPaused = !paused;
+                pausedRef.current = nextPaused;
+                setPaused(nextPaused);
+                if (nextPaused) stopAllSpeech();
+              }}
               className="btn text-xs px-3 py-1.5"
               style={{ background: "rgba(255,255,255,0.1)", color: "var(--color-paper)", borderRadius: "6px" }}
             >
               {paused ? "▶ Resume" : "⏸ Pause"}
             </button>
+            {error && (
+              <button
+                onClick={() => {
+                  pausedRef.current = false;
+                  setPaused(false);
+                  setError("");
+                }}
+                className="btn text-xs px-3 py-1.5"
+                style={{ background: "rgba(255,255,255,0.1)", color: "var(--color-paper)", borderRadius: "6px" }}
+              >
+                Retry turn
+              </button>
+            )}
             <button
               onClick={skipPhase}
               className="btn text-xs px-3 py-1.5"
@@ -559,7 +757,6 @@ export default function LiveConferencePage() {
                                   ...prev,
                                   transcript: [...prev.transcript, e],
                                   userHasFloor: false,
-                                  userSpeechCount: prev.userSpeechCount + 1,
                                 }
                               : prev
                           );
@@ -601,6 +798,7 @@ export default function LiveConferencePage() {
                   </div>
                   <textarea
                     ref={draftRef}
+                    maxLength={10_000}
                     value={draftSpeech}
                     onChange={(e) => setDraftSpeech(e.target.value)}
                     rows={5}
@@ -618,6 +816,7 @@ export default function LiveConferencePage() {
                   <div className="flex gap-3 items-center flex-wrap mb-1">
                     <button
                       onClick={recording ? stopRecording : startRecording}
+                      disabled={transcribing}
                       className="btn text-sm px-4 py-2"
                       style={{
                         background: recording ? "#dc2626" : "var(--color-surface)",
@@ -651,7 +850,7 @@ export default function LiveConferencePage() {
                       </span>
                       <button
                         onClick={deliverSpeech}
-                        disabled={!draftSpeech.trim()}
+                        disabled={!draftSpeech.trim() || recording || transcribing}
                         className="btn btn-primary text-sm"
                         style={{ background: draftSpeech.trim() ? "var(--color-ink)" : undefined }}
                       >

@@ -532,6 +532,21 @@ export async function nextTurn(state: ConferenceState): Promise<TurnResult> {
   newEntries.push(...result.newEntries);
   advance = { ...advance, ...result.advance };
 
+  if (
+    result.advance.phaseIndex !== undefined &&
+    result.advance.phaseIndex !== state.phaseIndex
+  ) {
+    return {
+      response: {
+        kind: "phase-transition",
+        from: phase.type,
+        to: state.plan.phases[result.advance.phaseIndex]?.type ?? "closing",
+      },
+      newEntries,
+      advance,
+    };
+  }
+
   if (result.advance.userHasFloor) {
     const chairLine = newEntries.find((e) => e.role === "chair")?.text ?? "";
     return {

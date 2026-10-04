@@ -4,6 +4,9 @@ import { anthropic, isAnthropicConfigured, MODEL_SONNET } from "./anthropic";
 export const LLM_NOT_CONFIGURED_MESSAGE =
   "No LLM provider is configured. Set at least one of: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, or ANTHROPIC_API_KEY in .env.local.";
 
+const PROVIDER_TIMEOUT_MS = 18_000;
+const FALLBACK_BUDGET_MS = 27_000;
+
 type CallOpts = {
   system: string;
   user: string;
@@ -26,23 +29,40 @@ class TimeoutError extends Error {
   }
 }
 
+class InvalidJsonResponseError extends Error {
+  constructor() {
+    super("Provider returned JSON that did not match the required schema");
+  }
+}
+
+type JsonValidation<T> =
+  | { success: true; data: T }
+  | { success: false };
+
 function nonEmpty(text: string): string {
   if (!text || !text.trim()) throw new EmptyResponseError();
   return text.trim();
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, provider: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new TimeoutError(provider)), ms)
-    ),
-  ]);
+function withTimeout<T>(
+  call: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  provider: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new TimeoutError(provider));
+    }, ms);
+    const p = call(controller.signal);
+    p.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
 }
 
-async function callGemini(opts: CallOpts): Promise<string> {
+async function callGemini(opts: CallOpts, signal: AbortSignal): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: modelName,
@@ -53,7 +73,7 @@ async function callGemini(opts: CallOpts): Promise<string> {
       ...(opts.json ? { responseMimeType: "application/json" } : {}),
     },
   });
-  const result = await model.generateContent(opts.user);
+  const result = await model.generateContent(opts.user, { signal });
   const text = result.response.text();
   return nonEmpty(text);
 }
@@ -63,7 +83,8 @@ async function callOpenAICompat(
   baseUrl: string,
   apiKey: string,
   model: string,
-  providerName: string
+  providerName: string,
+  signal: AbortSignal
 ): Promise<string> {
   const body: Record<string, unknown> = {
     model,
@@ -85,16 +106,13 @@ async function callOpenAICompat(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
-  if (res.status === 429 || res.status === 503 || res.status === 504) {
-    const err = new Error(`${providerName} responded with ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`${providerName} error ${res.status}: ${await res.text()}`);
     (err as Error & { status: number }).status = res.status;
     throw err;
-  }
-
-  if (!res.ok) {
-    throw new Error(`${providerName} error ${res.status}: ${await res.text()}`);
   }
 
   const data = await res.json();
@@ -102,7 +120,7 @@ async function callOpenAICompat(
   return nonEmpty(text);
 }
 
-async function callAnthropic(opts: CallOpts): Promise<string> {
+async function callAnthropic(opts: CallOpts, signal: AbortSignal): Promise<string> {
   const msg = await anthropic.messages.create({
     model: MODEL_SONNET,
     max_tokens: opts.maxTokens ?? 1024,
@@ -115,7 +133,7 @@ async function callAnthropic(opts: CallOpts): Promise<string> {
       },
     ],
     messages: [{ role: "user", content: opts.user }],
-  });
+  }, { signal });
 
   let text = msg.content
     .filter((b) => b.type === "text")
@@ -135,7 +153,7 @@ async function callAnthropic(opts: CallOpts): Promise<string> {
 
 type Provider = {
   name: string;
-  call: (opts: CallOpts) => Promise<string>;
+  call: (opts: CallOpts, signal: AbortSignal) => Promise<string>;
 };
 
 function buildProviders(): Provider[] {
@@ -148,13 +166,14 @@ function buildProviders(): Provider[] {
   if (process.env.GROQ_API_KEY) {
     providers.push({
       name: "Groq",
-      call: (opts) =>
+      call: (opts, signal) =>
         callOpenAICompat(
           opts,
           "https://api.groq.com/openai/v1",
           process.env.GROQ_API_KEY!,
           process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-          "Groq"
+          "Groq",
+          signal
         ),
     });
   }
@@ -162,13 +181,14 @@ function buildProviders(): Provider[] {
   if (process.env.CEREBRAS_API_KEY) {
     providers.push({
       name: "Cerebras",
-      call: (opts) =>
+      call: (opts, signal) =>
         callOpenAICompat(
           opts,
           "https://api.cerebras.ai/v1",
           process.env.CEREBRAS_API_KEY!,
           process.env.CEREBRAS_MODEL || "qwen-3-235b-a22b-instruct-2507",
-          "Cerebras"
+          "Cerebras",
+          signal
         ),
     });
   }
@@ -197,35 +217,75 @@ export function configuredProviders(): string[] {
 
 function isRetryable(err: unknown): boolean {
   const status = (err as Error & { status?: number })?.status;
-  if (status === 429 || status === 503 || status === 504) return true;
+  if (
+    status === 401 || status === 403 || status === 404 || status === 408 ||
+    status === 429 || status === 500 || status === 502 || status === 503 ||
+    status === 504
+  ) return true;
   if (err instanceof EmptyResponseError) return true;
   if (err instanceof TimeoutError) return true;
+  // Provider SDKs do not always expose HTTP status codes consistently.
+  // A retired/unknown model or a temporary network failure should still
+  // allow the next configured provider to serve the request.
+  const message = err instanceof Error ? err.message : String(err);
+  if (
+    /API_KEY_INVALID|API key not valid|invalid API key|fetch failed|network error|ECONNRESET|ETIMEDOUT/i.test(message)
+  ) return true;
+  if (/\[(401|403|404|408|429|500|502|503|504)\b|\bHTTP\s+(401|403|404|408|429|500|502|503|504)\b/i.test(message)) return true;
   return false;
 }
 
-export async function chat(opts: CallOpts): Promise<string> {
+async function callWithFallback<T>(
+  opts: CallOpts,
+  parse?: (text: string) => T
+): Promise<string | T> {
   const PROVIDERS = getProviders();
   if (PROVIDERS.length === 0) throw new Error(LLM_NOT_CONFIGURED_MESSAGE);
 
+  const deadline = Date.now() + FALLBACK_BUDGET_MS;
   let lastErr: unknown;
   for (const provider of PROVIDERS) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+
     try {
-      return await withTimeout(provider.call(opts), 18_000, provider.name);
+      const text = await withTimeout(
+        (signal) => provider.call(opts, signal),
+        Math.min(PROVIDER_TIMEOUT_MS, remainingMs),
+        provider.name
+      );
+      return parse ? parse(text) : text;
     } catch (err) {
       lastErr = err;
-      if (!isRetryable(err)) throw err;
+      if (
+        !(err instanceof SyntaxError) &&
+        !(err instanceof InvalidJsonResponseError) &&
+        !isRetryable(err)
+      ) throw err;
       console.warn(`[llm] ${provider.name} failed, trying next:`, (err as Error).message);
     }
   }
-  throw lastErr;
+  throw lastErr ?? new TimeoutError("provider fallback chain");
 }
 
-export async function chatJson<T>(opts: CallOpts): Promise<T> {
-  const raw = await chat({ ...opts, json: true });
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  return JSON.parse(cleaned) as T;
+export async function chat(opts: CallOpts): Promise<string> {
+  return (await callWithFallback(opts)) as string;
+}
+
+export async function chatJson<T>(
+  opts: CallOpts,
+  validate?: (value: unknown) => JsonValidation<T>
+): Promise<T> {
+  return (await callWithFallback({ ...opts, json: true }, (raw) => {
+    const cleaned = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    const value = JSON.parse(cleaned) as unknown;
+    if (!validate) return value as T;
+    const result = validate(value);
+    if (!result.success) throw new InvalidJsonResponseError();
+    return result.data;
+  })) as T;
 }
