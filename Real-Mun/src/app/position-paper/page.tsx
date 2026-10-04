@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { COMMITTEES, POPULAR_COUNTRIES, SAMPLE_TOPICS } from "@/lib/mun-data";
 import FeedbackView, { type FeedbackData } from "@/components/FeedbackView";
+import { savePaperReview } from "@/lib/review-storage";
 
 export default function PositionPaperPage() {
   const [step, setStep] = useState(1);
@@ -13,6 +15,7 @@ export default function PositionPaperPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState<FeedbackData | null>(null);
+  const [savedToArchive, setSavedToArchive] = useState<boolean | null>(null);
 
   const wordCount = paper.trim() ? paper.trim().split(/\s+/).length : 0;
 
@@ -40,6 +43,13 @@ export default function PositionPaperPage() {
       setCountry(normalized.country);
       setTopic(normalized.topic);
       setPaper(normalized.paper);
+      setSavedToArchive(savePaperReview({
+        committee: normalized.committee,
+        country: normalized.country,
+        topic: normalized.topic,
+        paper: normalized.paper,
+        feedback: data.feedback,
+      }));
       setFeedback(data.feedback);
       setStep(5);
     } catch (e) {
@@ -62,6 +72,7 @@ export default function PositionPaperPage() {
     setTopic("");
     setPaper("");
     setFeedback(null);
+    setSavedToArchive(null);
     setError("");
   }
 
@@ -325,6 +336,12 @@ export default function PositionPaperPage() {
             country={country}
             topic={topic}
           />
+          {savedToArchive !== null && (
+            <p className="mt-4 text-sm" style={{ color: "var(--color-muted)" }}>
+              {savedToArchive ? "Review saved on this device." : "This review could not be saved on this device."}{" "}
+              {savedToArchive && <Link href="/reviews" className="font-medium underline" style={{ color: "var(--color-accent)" }}>View My Reviews</Link>}
+            </p>
+          )}
           <button onClick={reset} className="btn btn-secondary mt-8">
             Review another paper
           </button>

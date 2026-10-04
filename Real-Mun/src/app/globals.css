@@ -135,6 +135,28 @@ input, textarea, select {
 }
 .speaking-ring { animation: pulse-ring 1.4s infinite; }
 
+@keyframes voice-wave-motion {
+  0% { transform: scaleY(0.18); opacity: 0.45; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+.voice-wave-bar {
+  display: block;
+  width: 3px;
+  flex: 0 0 3px;
+  border-radius: 999px;
+  transform: scaleY(0.16);
+  background: linear-gradient(180deg, var(--color-accent-2), var(--color-accent));
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  opacity: 0.55;
+}
+.voice-waveform[data-active="true"] .voice-wave-bar {
+  transform-origin: center;
+  animation: voice-wave-motion 700ms ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-waveform[data-active="true"] .voice-wave-bar { animation: none; transform: scaleY(0.65); }
+}
+
 
 @keyframes logo-shimmer {
   0%, 100% { background-position: 0% 50%; }

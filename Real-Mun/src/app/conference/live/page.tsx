@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ConferenceState, TranscriptEntry, TurnResult } from "@/lib/conference/types";
 import {
@@ -9,7 +10,9 @@ import {
 } from "@/lib/conference/types";
 import TranscriptFeed from "@/components/conference/TranscriptFeed";
 import PhaseProgress from "@/components/conference/PhaseProgress";
+import VoiceVisualizer from "@/components/conference/VoiceVisualizer";
 import SessionFeedback, { type SessionFeedbackResult } from "@/components/conference/SessionFeedback";
+import { saveConferenceReview } from "@/lib/review-storage";
 import {
   speakChair,
   speakBrowser,
@@ -60,6 +63,7 @@ export default function LiveConferencePage() {
   const [feedback, setFeedback] = useState<SessionFeedbackResult | null>(null);
   const [feedbackRetry, setFeedbackRetry] = useState(0);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
+  const [archiveNotice, setArchiveNotice] = useState("");
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
   const [floorJustOpened, setFloorJustOpened] = useState(false);
@@ -155,6 +159,7 @@ export default function LiveConferencePage() {
   // Fetch feedback when session ends (with retry for rate limits)
   useEffect(() => {
     if (!state || state.status !== "ended" || feedback || loadingFeedback) return;
+    const endedState = state;
     const feedbackController = new AbortController();
     setLoadingFeedback(true);
 
@@ -164,7 +169,7 @@ export default function LiveConferencePage() {
         const r = await fetch("/api/conference/feedback", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state }),
+          body: JSON.stringify({ state: endedState }),
           signal: feedbackController.signal,
         });
         const d = await r.json();
@@ -181,7 +186,25 @@ export default function LiveConferencePage() {
           setFeedback({ error: "Feedback response was incomplete. Please try again." });
           return;
         }
-        setFeedback(d.feedback as SessionFeedbackResult);
+        const result = d.feedback as SessionFeedbackResult;
+        if ("error" in result) {
+          setFeedback(result);
+          return;
+        }
+        const saved = saveConferenceReview({
+          id: `conference-${endedState.sessionStartedAt}`,
+          createdAt: endedState.sessionStartedAt,
+          committee: endedState.setup.committee,
+          country: endedState.setup.userCountry,
+          topic: endedState.setup.topic,
+          durationMs: Math.max(0, Date.now() - endedState.sessionStartedAt),
+          speeches: endedState.transcript
+            .filter((entry) => entry.role === "user")
+            .map((entry) => entry.text),
+          feedback: result,
+        });
+        setArchiveNotice(saved ? "Review saved on this device." : "This review could not be saved on this device.");
+        setFeedback(result);
       } catch {
         if (feedbackController.signal.aborted) return;
         if (attempt < 3) {
@@ -563,6 +586,16 @@ export default function LiveConferencePage() {
             }}
           />
         )}
+        {archiveNotice && (
+          <p className="mt-4 text-sm" style={{ color: "var(--color-muted)" }}>
+            {archiveNotice}{" "}
+            {archiveNotice.startsWith("Review saved") && (
+              <Link href="/reviews" className="font-medium underline" style={{ color: "var(--color-accent)" }}>
+                View My Reviews
+              </Link>
+            )}
+          </p>
+        )}
         <div className="flex gap-4 mt-8">
           <button onClick={() => router.push("/conference")} className="btn btn-primary">
             Start a new session
@@ -813,6 +846,7 @@ export default function LiveConferencePage() {
                       transition: "border-color 0.2s",
                     }}
                   />
+                  <VoiceVisualizer active={recording} />
                   <div className="flex gap-3 items-center flex-wrap mb-1">
                     <button
                       onClick={recording ? stopRecording : startRecording}

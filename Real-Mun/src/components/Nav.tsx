@@ -28,6 +28,7 @@ export default function Nav() {
   const links = [
     { href: "/learn", label: "Learn" },
     { href: "/position-paper", label: "Position Paper" },
+    { href: "/reviews", label: "My Reviews" },
     { href: "/sessions", label: "1-on-1 Sessions" },
     { href: "/conference", label: "Mock Conference" },
   ];
@@ -59,7 +60,7 @@ export default function Nav() {
         </Link>
 
         {/* Desktop links */}
-        <div className="hidden md:flex items-center gap-1">
+        <div className="hidden lg:flex items-center gap-1">
           {links.map((l) => (
             <Link
               key={l.href}
@@ -77,7 +78,7 @@ export default function Nav() {
           <ThemeToggle />
 
           {session ? (
-            <div className="hidden md:flex items-center gap-3">
+              <div className="hidden lg:flex items-center gap-3">
               {session.role === "worker" && (
                 <Link
                   href="/worker"
@@ -104,14 +105,14 @@ export default function Nav() {
               </button>
             </div>
           ) : (
-            <Link href="/sign-in" className="hidden md:inline-flex btn btn-primary text-sm px-4 py-2">
+            <Link href="/sign-in" className="hidden lg:inline-flex btn btn-primary text-sm px-4 py-2">
               Sign in
             </Link>
           )}
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5"
+            className="lg:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5"
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label="Menu"
           >
@@ -128,7 +129,7 @@ export default function Nav() {
       {/* Mobile menu */}
       {menuOpen && (
         <div
-          className="md:hidden border-t px-5 py-4 space-y-2"
+          className="lg:hidden border-t px-5 py-4 space-y-2"
           style={{ borderColor: "var(--color-border)", background: "var(--color-paper)" }}
         >
           {links.map((l) => (
